@@ -1,0 +1,72 @@
+{
+  "name": "e-imzo-web",
+  "version": "0.1.0",
+  "description": "E-IMZO signing library for the web: framework-agnostic core + React hook + mock, for document signing and challenge-response login.",
+  "type": "module",
+  "sideEffects": false,
+  "license": "MIT",
+  "keywords": [
+    "e-imzo",
+    "eimzo",
+    "digital-signature",
+    "pkcs7",
+    "uzbekistan",
+    "react"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "dist",
+    "vendor",
+    "README.md"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/core/index.d.ts",
+      "import": "./dist/core/index.js",
+      "require": "./dist/core/index.cjs"
+    },
+    "./react": {
+      "types": "./dist/react/index.d.ts",
+      "import": "./dist/react/index.js",
+      "require": "./dist/react/index.cjs"
+    },
+    "./mock": {
+      "types": "./dist/mock/index.d.ts",
+      "import": "./dist/mock/index.js",
+      "require": "./dist/mock/index.cjs"
+    },
+    "./vendor/e-imzo.js": "./vendor/e-imzo.js",
+    "./vendor/e-imzo-client.js": "./vendor/e-imzo-client.js"
+  },
+  "scripts": {
+    "build:vendor": "node scripts/build-vendor.mjs",
+    "prebuild": "npm run build:vendor",
+    "build": "tsup",
+    "typecheck": "npm run build:vendor && tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "prepublishOnly": "npm run build"
+  },
+  "peerDependencies": {
+    "react": ">=18"
+  },
+  "peerDependenciesMeta": {
+    "react": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@testing-library/dom": "^10.4.1",
+    "@testing-library/react": "^16.3.2",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.7",
+    "jsdom": "^25.0.1",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "tsup": "^8.3.5",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}

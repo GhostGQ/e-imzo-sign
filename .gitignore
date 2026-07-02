@@ -1,0 +1,6 @@
+node_modules/
+dist/
+*.log
+
+# Generated from vendor/*.js by scripts/build-vendor.mjs (prebuild)
+src/core/vendor.ts
