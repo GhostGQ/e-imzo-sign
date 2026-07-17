@@ -1,6 +1,6 @@
 {
   "name": "e-imzo-web",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "E-IMZO signing library for the web: framework-agnostic core + React hook + mock, for document signing and challenge-response login.",
   "type": "module",
   "sideEffects": false,
