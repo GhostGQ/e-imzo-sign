@@ -49,7 +49,7 @@ export interface UseEImzoReturn {
   selectCertBySerial: (serialNumber: string) => void
 
   /** Challenge-response with a file/token certificate (defaults to the selected cert). */
-  signIn: (cert?: Certificate) => Promise<void>
+  signIn: (cert?: Certificate | null) => Promise<void>
   /** Challenge-response via the USB-token / ID-card flow. */
   signWithUsbToken: () => Promise<void>
 
@@ -130,7 +130,7 @@ export function useEImzo(options: UseEImzoOptions): UseEImzoReturn {
   )
 
   const signIn = useCallback(
-    async (cert?: Certificate) => {
+    async (cert?: Certificate | null) => {
       if (!core) {
         reportSignError(new EImzoError('UNKNOWN', 'No E-IMZO core available. Wrap in <EImzoProvider> or pass `core`.'))
         return

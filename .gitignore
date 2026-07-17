@@ -1,5 +1,6 @@
 node_modules/
 dist/
+demo/dist/
 *.log
 
 # Generated from vendor/*.js by scripts/build-vendor.mjs (prebuild)

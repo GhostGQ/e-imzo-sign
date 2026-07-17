@@ -24,6 +24,27 @@ npm i e-imzo-web
 | `e-imzo-web/react` | `useEImzo` hook (+ re-exported core factory & types) |
 | `e-imzo-web/mock` | `MockEImzoCore` for local dev / Storybook / CI |
 
+## Live demo
+
+An interactive demo runs the real React hooks (`EImzoProvider` + `useEImzo`) on
+the built-in `MockEImzoCore`, so it works **without the E-IMZO desktop app** —
+open it, pick a certificate, and sign a challenge. It also lets you simulate
+error scenarios (wrong password, user cancelled) and network latency.
+
+- **Live page:** _(published to GitHub Pages by [`.github/workflows/deploy-demo.yml`](.github/workflows/deploy-demo.yml) — enable Pages once: Settings → Pages → Source: GitHub Actions)_
+- **Run locally:**
+
+  ```bash
+  npm install
+  npm run demo         # Vite dev server (source-aliased, hot reload)
+  # or a production build:
+  npm run demo:build && npm run demo:preview
+  ```
+
+The demo source lives in [`demo/`](demo/) and imports the library through its
+public entry points (`e-imzo-web/react`, aliased to source), so it doubles as a
+usage reference.
+
 ## Quick start (recommended: `EImzoProvider`)
 
 Wrap the part of your app that signs in `EImzoProvider` once. It memoizes the
