@@ -168,6 +168,26 @@ code { font-family: var(--mono); font-size: 0.9em; }
 }
 .usage code { color: var(--text); }
 
+/* Mode banner */
+.banner {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;
+  margin: 0 0 12px; padding: 12px 16px; border-radius: var(--radius);
+  border: 1px solid var(--border); background: var(--panel-2); font-size: 14px;
+}
+.banner--real { border-color: color-mix(in srgb, var(--ok) 45%, var(--border)); background: var(--ok-bg); color: var(--ok); }
+.banner--mock { color: var(--muted); }
+.linkbtn { border: 0; background: none; color: var(--accent); font-weight: 600; font-size: 13px; cursor: pointer; padding: 0; white-space: nowrap; }
+.linkbtn:hover { text-decoration: underline; }
+
+/* Detecting spinner */
+.detecting { display: flex; align-items: center; gap: 12px; color: var(--muted); padding: 8px 0; }
+.spinner {
+  width: 18px; height: 18px; flex: none; border-radius: 50%;
+  border: 2px solid var(--border); border-top-color: var(--accent);
+  animation: spin 0.7s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
 .footer { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px; margin-top: 40px; color: var(--muted); font: 500 12px/1.5 var(--mono); }
 
 @media (max-width: 520px) {

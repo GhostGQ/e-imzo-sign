@@ -70,7 +70,9 @@ export function mapError(
     })
   }
 
-  if (r && /cancel/i.test(r)) {
+  // E-IMZO localizes the cancellation reason: EN "cancel(led)", RU "Операция отменена",
+  // UZ "Amaliyot bekor qilindi". Match the stems of all three.
+  if (r && /cancel|отмен|bekor/i.test(r)) {
     return new EImzoError('USER_CANCELLED', 'Operation cancelled by user.', {
       reason: r,
       original: e,

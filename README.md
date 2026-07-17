@@ -1,5 +1,13 @@
 # e-imzo-web
 
+[![Live demo](https://img.shields.io/badge/demo-live-2ea44f?style=flat-square)](https://ghostgq.github.io/e-imzo-sign/)
+![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?style=flat-square&logo=typescript&logoColor=white)
+![React](https://img.shields.io/badge/React-18_%7C_19-61DAFB?style=flat-square&logo=react&logoColor=black)
+![Vite](https://img.shields.io/badge/Vite-646CFF?style=flat-square&logo=vite&logoColor=white)
+![License: MIT](https://img.shields.io/badge/License-MIT-blue?style=flat-square)
+
+**🚀 [Try the live demo →](https://ghostgq.github.io/e-imzo-sign/)** — runs on the built-in mock, no E-IMZO app required.
+
 E-IMZO signing library for web (React) apps. Wraps the vendor
 `e-imzo.js` / `e-imzo-client.js` scripts (the E-IMZO desktop app's `CAPIWS` /
 `EIMZOClient` globals) with a framework-agnostic core, a React hook, typed
@@ -26,12 +34,19 @@ npm i e-imzo-web
 
 ## Live demo
 
-An interactive demo runs the real React hooks (`EImzoProvider` + `useEImzo`) on
-the built-in `MockEImzoCore`, so it works **without the E-IMZO desktop app** —
-open it, pick a certificate, and sign a challenge. It also lets you simulate
-error scenarios (wrong password, user cancelled) and network latency.
+An interactive demo runs the real React hooks (`EImzoProvider` + `useEImzo`). It
+**auto-detects your local E-IMZO**: if the app is installed with usable keys you
+sign with your real certificates; otherwise it transparently falls back to the
+built-in `MockEImzoCore`, so it always works **without the E-IMZO desktop app**.
+In mock mode you can simulate error scenarios (wrong password, user cancelled)
+and network latency.
 
-- **Live page:** _(published to GitHub Pages by [`.github/workflows/deploy-demo.yml`](.github/workflows/deploy-demo.yml) — enable Pages once: Settings → Pages → Source: GitHub Actions)_
+> Real mode needs a per-domain E-IMZO API key. The demo ships the public
+> `localhost` / `127.0.0.1` keys, so real signing works when you run it locally;
+> on the hosted page it falls back to the mock unless you register a key for that
+> domain and add it to `DEMO_API_KEYS` in [`demo/src/App.tsx`](demo/src/App.tsx).
+
+- **Live page:** **https://ghostgq.github.io/e-imzo-sign/** (auto-deployed by [`.github/workflows/deploy-demo.yml`](.github/workflows/deploy-demo.yml))
 - **Run locally:**
 
   ```bash

@@ -13,6 +13,12 @@ describe('mapError', () => {
     expect(mapError(null, 'User cancelled the operation').code).toBe('USER_CANCELLED')
   })
 
+  it('maps localized (ru/uz) cancellation reasons to USER_CANCELLED', () => {
+    // Real reason strings E-IMZO returns depending on its UI language.
+    expect(mapError(null, 'Операция отменена').code).toBe('USER_CANCELLED')
+    expect(mapError(null, 'Amaliyot bekor qilindi').code).toBe('USER_CANCELLED')
+  })
+
   it('maps a DOM Event with no reason to APP_NOT_RUNNING', () => {
     const fakeEvent = { isTrusted: true }
     expect(mapError(fakeEvent, null).code).toBe('APP_NOT_RUNNING')
