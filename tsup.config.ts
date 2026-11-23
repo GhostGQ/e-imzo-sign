@@ -7,6 +7,7 @@ export default defineConfig({
     'mock/index': 'src/mock/index.ts',
   },
   format: ['esm', 'cjs'],
+  splitting: true,
   dts: true,
   treeshake: true,
   clean: true,
