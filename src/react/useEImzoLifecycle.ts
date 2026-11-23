@@ -1,7 +1,11 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 
 import { EImzoError, mapError } from '../core/errors'
-import { getCertStatus as computeCertStatus, isCertExpired as computeIsExpired } from '../core/types'
+import {
+  certificateIdentity,
+  getCertStatus as computeCertStatus,
+  isCertExpired as computeIsExpired,
+} from '../core/types'
 import type { CertStatus, Certificate, IEImzoCore } from '../core/types'
 
 export type EImzoStatus = 'idle' | 'loading_scripts' | 'installing' | 'ready' | 'error'
@@ -23,7 +27,7 @@ export interface EImzoLifecycle {
   selectCertBySerial: (serialNumber: string) => void
   onBaseScriptLoad: () => void
   onClientScriptLoad: () => void
-  onScriptError: () => void
+  onScriptError: (error?: unknown) => void
   getCertStatus: (cert: Certificate) => CertStatus
   isCertExpired: (cert: Certificate) => boolean
 }
@@ -35,89 +39,132 @@ export interface UseEImzoLifecycleOptions {
   onError?: (error: EImzoError) => void
 }
 
+const emptyState = {
+  status: 'idle' as EImzoStatus,
+  certificates: [] as Certificate[],
+  selectedCert: null as Certificate | null,
+  error: null as EImzoError | null,
+}
+
+export const useBrowserLayoutEffect = typeof window === 'undefined' ? useEffect : useLayoutEffect
+
 export function useEImzoLifecycle(
   core: IEImzoCore | null,
   { autoInit = true, onError }: UseEImzoLifecycleOptions = {}
 ): EImzoLifecycle {
-  const [status, setStatus] = useState<EImzoStatus>('idle')
-  const [certificates, setCertificates] = useState<Certificate[]>([])
-  const [selectedCert, setSelectedCert] = useState<Certificate | null>(null)
-  const [error, setError] = useState<EImzoError | null>(null)
-
-  // The core this instance has already initialized; changing core triggers re-init.
-  const initedCoreRef = useRef<IEImzoCore | null>(null)
+  const scope = useMemo(() => ({
+    active: true,
+    initialized: false,
+    initialization: undefined as Promise<void> | undefined,
+    refresh: undefined as Promise<void> | undefined,
+  }), [core])
+  const [state, setState] = useState({ scope, ...emptyState })
+  const current = state.scope === scope ? state : emptyState
   const onErrorRef = useRef(onError)
-  onErrorRef.current = onError
 
-  const reportError = useCallback((e: unknown, reason?: string | null): EImzoError => {
-    const err = e instanceof EImzoError ? e : mapError(e, reason)
-    setError(err)
-    setStatus('error')
-    onErrorRef.current?.(err)
-    return err
-  }, [])
+  useBrowserLayoutEffect(() => {
+    onErrorRef.current = onError
+  }, [onError])
+
+  useBrowserLayoutEffect(() => {
+    scope.active = true
+    return () => { scope.active = false }
+  }, [scope])
+
+  const update = useCallback((patch: (previous: typeof emptyState) => Partial<typeof emptyState>) => {
+    if (scope.active) {
+      setState((previous) => {
+        const oldState = previous.scope === scope ? previous : emptyState
+        return { ...oldState, ...patch(oldState), scope }
+      })
+    }
+  }, [scope])
+
+  const reportError = useCallback((e: unknown): EImzoError => {
+    const error = mapError(e)
+    if (scope.active) {
+      update(() => ({ error, status: 'error' }))
+      onErrorRef.current?.(error)
+    }
+    return error
+  }, [scope, update])
+
+  const applyCertificates = useCallback((certificates: Certificate[]) => {
+    update(({ selectedCert }) => ({
+      certificates,
+      selectedCert: selectedCert
+        ? certificates.find((cert) => certificateIdentity(cert) === certificateIdentity(selectedCert)) ?? null
+        : certificates[0] ?? null,
+      error: null,
+      status: 'ready',
+    }))
+  }, [update])
+
+  const initialize = useCallback((): Promise<void> => {
+    if (!core || !scope.active || scope.initialized) return Promise.resolve()
+    if (scope.initialization) return scope.initialization
+
+    update(() => ({ status: 'loading_scripts', error: null }))
+    scope.initialization = Promise.resolve().then(async () => {
+      if (!scope.active) return
+      await core.loadScripts()
+      if (!scope.active) return
+      update(() => ({ status: 'installing' }))
+      await core.install()
+      if (!scope.active) return
+      const list = await core.listCertificates()
+      if (!scope.active) return
+      scope.initialized = true
+      applyCertificates(list)
+    }).catch((error: unknown) => {
+      reportError(error)
+    }).finally(() => {
+      scope.initialization = undefined
+    })
+    return scope.initialization
+  }, [core, scope, update, applyCertificates, reportError])
 
   const refreshCertificates = useCallback(async () => {
-    if (!core) return
-    try {
-      const list = await core.listCertificates()
-      setCertificates(list)
-      setSelectedCert((prev) =>
-        prev && list.some((c) => c.serialNumber === prev.serialNumber) ? prev : list[0] ?? null
-      )
-    } catch (e) {
-      reportError(e)
-      throw e
-    }
-  }, [core, reportError])
-
-  const initialize = useCallback(async () => {
-    if (!core || initedCoreRef.current === core) return
-    initedCoreRef.current = core
-    try {
-      setError(null)
-      setStatus('loading_scripts')
-      await core.loadScripts()
-      setStatus('installing')
-      await core.install()
-      await refreshCertificates()
-      setStatus('ready')
-    } catch (e) {
-      // Allow a retry after a failed init (e.g. app was not running yet).
-      initedCoreRef.current = null
-      if (!(e instanceof EImzoError)) reportError(e)
-      else {
-        setError(e)
-        setStatus('error')
-        onErrorRef.current?.(e)
-      }
-    }
-  }, [core, refreshCertificates, reportError])
+    if (!core || !scope.active) return
+    if (scope.initialization) return scope.initialization
+    if (!scope.initialized) return initialize()
+    scope.refresh ??= Promise.resolve().then(async () => {
+      if (scope.active) applyCertificates(await core.listCertificates())
+    }).catch((e: unknown) => {
+      if (scope.active) throw reportError(e)
+    }).finally(() => {
+      scope.refresh = undefined
+    })
+    return scope.refresh
+  }, [core, scope, initialize, applyCertificates, reportError])
 
   useEffect(() => {
-    if (core && autoInit) void initialize()
-  }, [core, autoInit, initialize])
+    if (autoInit) void initialize()
+  }, [autoInit, initialize])
 
-  const selectCert = useCallback((cert: Certificate) => setSelectedCert(cert), [])
-  const selectCertBySerial = useCallback(
-    (serialNumber: string) =>
-      setSelectedCert((prev) => certificates.find((c) => c.serialNumber === serialNumber) ?? prev),
-    [certificates]
-  )
+  const selectCert = useCallback((selectedCert: Certificate) => update(() => ({ selectedCert })), [update])
+  const selectCertBySerial = useCallback((serialNumber: string) => {
+    update(({ certificates, selectedCert }) => ({
+      selectedCert: certificates.find((cert) => cert.serialNumber === serialNumber) ?? selectedCert,
+    }))
+  }, [update])
 
-  const onBaseScriptLoad = useCallback(() => core?.markBaseScriptLoaded(), [core])
-  const onClientScriptLoad = useCallback(() => core?.markClientScriptLoaded(), [core])
-  const onScriptError = useCallback(() => {
-    core?.markScriptError()
-    reportError(new EImzoError('APP_NOT_RUNNING', 'Failed to load E-IMZO scripts.'))
-  }, [core, reportError])
+  const onBaseScriptLoad = useCallback(() => {
+    if (scope.active) core?.markBaseScriptLoaded()
+  }, [core, scope])
+  const onClientScriptLoad = useCallback(() => {
+    if (scope.active) core?.markClientScriptLoaded()
+  }, [core, scope])
+  const onScriptError = useCallback((error?: unknown) => {
+    if (scope.active) core?.markScriptError(error)
+  }, [core, scope])
 
   return {
     core,
-    status,
-    certificates,
-    selectedCert,
-    error,
+    status: current.status,
+    certificates: current.certificates,
+    selectedCert: current.selectedCert,
+    error: current.error,
     initialize,
     refreshCertificates,
     selectCert,
@@ -125,7 +172,7 @@ export function useEImzoLifecycle(
     onBaseScriptLoad,
     onClientScriptLoad,
     onScriptError,
-    getCertStatus: (cert) => computeCertStatus(cert),
-    isCertExpired: (cert) => computeIsExpired(cert),
+    getCertStatus: computeCertStatus,
+    isCertExpired: computeIsExpired,
   }
 }

@@ -1,6 +1,7 @@
 import { EImzoError, mapError } from './errors'
-import { cookieKeyIdStorage, keyIdCacheKey } from './keyIdStorage'
+import { cookieKeyIdStorage, keyIdCacheKey, memoryKeyIdStorage } from './keyIdStorage'
 import { ScriptLoader } from './scriptLoader'
+import { certificateIdentity, getCertStatus } from './types'
 import type {
   ApiKeys,
   Certificate,
@@ -50,11 +51,6 @@ function toCertificate(vo: VendorVo): Certificate {
   }
 }
 
-/** Stable per-certificate id used to key the keyId cache (TIN, falling back to PINFL/serial). */
-function cacheIdPart(cert: Certificate): string {
-  return cert.TIN || cert.PINFL || cert.serialNumber
-}
-
 /**
  * Framework-agnostic E-IMZO client. Wraps the vendor `EIMZOClient`/`CAPIWS` globals
  * with promises and typed errors. See {@link IEImzoCore}.
@@ -64,6 +60,7 @@ export class EImzoCore implements IEImzoCore {
   private readonly minVersion: { major: number; minor: number }
   private readonly usbTokenId: string
   private readonly keyIdStorage: KeyIdStorage
+  private readonly transientKeyIds = memoryKeyIdStorage()
   private readonly loader: ScriptLoader
 
   constructor(config: EImzoConfig) {
@@ -93,8 +90,6 @@ export class EImzoCore implements IEImzoCore {
 
   async install(): Promise<{ major: number; minor: number }> {
     const client = getEIMZOClient()
-    client.API_KEYS = flattenApiKeys(this.apiKeys)
-
     const version = await new Promise<{ major: number; minor: number }>((resolve, reject) => {
       client.checkVersion(
         (major, minor) => resolve({ major: parseInt(major, 10), minor: parseInt(minor, 10) }),
@@ -102,9 +97,11 @@ export class EImzoCore implements IEImzoCore {
       )
     })
 
-    const installed = version.major * 100 + version.minor
-    const required = this.minVersion.major * 100 + this.minVersion.minor
-    if (installed < required || !client.NEW_API) {
+    if (
+      !Number.isFinite(version.major) || !Number.isFinite(version.minor) || !client.NEW_API ||
+      version.major < this.minVersion.major ||
+      (version.major === this.minVersion.major && version.minor < this.minVersion.minor)
+    ) {
       throw new EImzoError(
         'OUTDATED_VERSION',
         `Installed E-IMZO version ${version.major}.${version.minor} is below the required ${this.minVersion.major}.${this.minVersion.minor}.`
@@ -112,6 +109,7 @@ export class EImzoCore implements IEImzoCore {
     }
 
     await new Promise<void>((resolve, reject) => {
+      client.API_KEYS = flattenApiKeys(this.apiKeys)
       client.installApiKeys(
         () => resolve(),
         (e, r) => reject(mapError(e, r, 'INVALID_API_KEY'))
@@ -144,9 +142,27 @@ export class EImzoCore implements IEImzoCore {
   }
 
   async sign(cert: Certificate, data: string): Promise<SignResult> {
+    if (
+      !cert?.serialNumber?.trim() ||
+      (cert.type !== 'pfx' && cert.type !== 'ftjc') ||
+      !cert.raw ||
+      getCertStatus(cert) !== 'valid'
+    ) {
+      throw new EImzoError('INVALID_CERTIFICATE', 'An active PFX or FTJC certificate is required.')
+    }
+
     const client = getEIMZOClient()
-    const storeKey = keyIdCacheKey(cacheIdPart(cert))
-    const cached = this.keyIdStorage.get(storeKey)
+    const identity = certificateIdentity(cert)
+    const subtle = globalThis.crypto?.subtle
+    const storage = subtle ? this.keyIdStorage : this.transientKeyIds
+    const hash = subtle && await subtle.digest('SHA-256', new TextEncoder().encode(identity))
+    const idPart = hash
+      ? Array.from(new Uint8Array(hash), (byte) => byte.toString(16).padStart(2, '0')).join('')
+      : identity
+    const storeKey = keyIdCacheKey(`v2:${idPart}`)
+    const legacyKey = keyIdCacheKey(cert.TIN || cert.PINFL || cert.serialNumber)
+    if (this.keyIdStorage.get(legacyKey) !== null) this.keyIdStorage.remove(legacyKey)
+    const cached = storage.get(storeKey)
 
     const createPkcs7 = (keyId: string): Promise<string> =>
       new Promise<string>((resolve, reject) => {
@@ -162,11 +178,10 @@ export class EImzoCore implements IEImzoCore {
     if (cached) {
       try {
         const pkcs7 = await createPkcs7(cached)
-        this.keyIdStorage.set(storeKey, cached)
         return { pkcs7, cert }
       } catch (err) {
-        // Stale/invalid cached keyId (e.g. wrong password against it): drop and re-load.
-        this.keyIdStorage.remove(storeKey)
+        // shortcut: evict on unidentified signing failures, retry automatically only if the SDK exposes a stable stale-key error.
+        if (err instanceof EImzoError && err.code === 'UNKNOWN') storage.remove(storeKey)
         throw err
       }
     }
@@ -180,11 +195,11 @@ export class EImzoCore implements IEImzoCore {
     })
 
     const pkcs7 = await createPkcs7(keyId)
-    this.keyIdStorage.set(storeKey, keyId)
+    storage.set(storeKey, keyId)
     return { pkcs7, cert }
   }
 
-  signWithUsbToken(data: string): Promise<SignResult> {
+  async signWithUsbToken(data: string): Promise<SignResult> {
     const client = getEIMZOClient()
     return new Promise<SignResult>((resolve, reject) => {
       client.createPkcs7(

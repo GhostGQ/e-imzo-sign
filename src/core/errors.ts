@@ -9,6 +9,8 @@ export type EImzoErrorCode =
   | 'USER_CANCELLED'
   /** API key registration failed. */
   | 'INVALID_API_KEY'
+  | 'INVALID_CERTIFICATE'
+  | 'SIGNING_IN_PROGRESS'
   /** Anything not matched above; inspect `reason` for the raw vendor message. */
   | 'UNKNOWN'
 
@@ -61,7 +63,7 @@ export function mapError(
 ): EImzoError {
   if (e instanceof EImzoError) return e
 
-  const r = reason ?? null
+  const r = reason ?? (e instanceof Error ? e.message : null)
 
   if (r && /BadPaddingException/i.test(r)) {
     return new EImzoError('WRONG_PASSWORD', 'Wrong key password or PIN.', {
@@ -79,16 +81,16 @@ export function mapError(
     })
   }
 
-  if (forceCode) {
-    return new EImzoError(forceCode, r ?? codeMessage(forceCode), {
+  if (!r && looksLikeDomEvent(e)) {
+    return new EImzoError('APP_NOT_RUNNING', 'E-IMZO application is not running.', {
       reason: r,
       original: e,
     })
   }
 
-  // No reason + a DOM Event usually means the CAPIWS WebSocket could not connect.
-  if (!r && looksLikeDomEvent(e)) {
-    return new EImzoError('APP_NOT_RUNNING', 'E-IMZO application is not running.', {
+  if (forceCode || r === 'Please install new version of E-IMZO') {
+    const code = forceCode ?? 'OUTDATED_VERSION'
+    return new EImzoError(code, r ?? codeMessage(code), {
       reason: r,
       original: e,
     })

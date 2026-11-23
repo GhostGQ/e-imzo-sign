@@ -5,6 +5,7 @@ import {
   createEImzoCore,
   useEImzo,
   useEImzoCore,
+  type CertStatus,
   type EImzoErrorCode,
 } from 'e-imzo-web/react'
 
@@ -30,8 +31,15 @@ const SCENARIOS: { id: Scenario; label: string }[] = [
   { id: 'USER_CANCELLED', label: 'User cancelled' },
 ]
 
+// E-IMZO validates its API key per page-origin. Only probe the real app on a domain
+// we actually have a key for (localhost/127.0.0.1). On any other host (e.g. the hosted
+// GitHub Pages demo) skip the pointless failing probe and start in mock mode directly.
+const CAN_PROBE_REAL =
+  typeof window !== 'undefined' &&
+  Boolean((DEMO_API_KEYS as Record<string, string>)[window.location.hostname])
+
 export function App() {
-  const [mode, setMode] = useState<Mode>(false)
+  const [mode, setMode] = useState<Mode>(CAN_PROBE_REAL ? false : 'auto')
   const [scenario, setScenario] = useState<Scenario>('success')
   const [latency, setLatency] = useState(500)
 
@@ -67,7 +75,7 @@ export function App() {
         </EImzoProvider>
       ) : (
         <>
-          <ModeBanner mode={mode} onUseReal={() => setMode(false)} />
+          <ModeBanner mode={mode} canProbeReal={CAN_PROBE_REAL} onUseReal={() => setMode(false)} />
           <EImzoProvider key={`${scenario}-${latency}`} mock={mockOpts}>
             <Signer mode="mock" scenario={scenario} />
           </EImzoProvider>
@@ -114,17 +122,29 @@ function RealGate({
   )
 }
 
-function ModeBanner({ mode, onUseReal }: { mode: 'auto' | 'forced'; onUseReal: () => void }) {
+function ModeBanner({
+  mode,
+  canProbeReal,
+  onUseReal,
+}: {
+  mode: 'auto' | 'forced'
+  canProbeReal: boolean
+  onUseReal: () => void
+}) {
+  const message =
+    mode === 'forced'
+      ? 'Demo (mock) mode — using fake certificates.'
+      : canProbeReal
+        ? 'E-IMZO not detected on this device — running on the built-in mock.'
+        : 'This domain has no registered E-IMZO API key, so real signing is unavailable here — running the built-in mock demo. Run it on localhost with E-IMZO to use your real keys.'
   return (
     <div className="banner banner--mock">
-      <span>
-        {mode === 'auto'
-          ? 'E-IMZO not detected on this device — running on the built-in mock.'
-          : 'Demo (mock) mode — using fake certificates.'}
-      </span>
-      <button className="linkbtn" onClick={onUseReal}>
-        Try my E-IMZO
-      </button>
+      <span>{message}</span>
+      {canProbeReal && (
+        <button className="linkbtn" onClick={onUseReal}>
+          Try my E-IMZO
+        </button>
+      )}
     </div>
   )
 }
@@ -152,7 +172,7 @@ function Signer({ mode, scenario }: { mode: 'real' | 'mock'; scenario?: Scenario
     onSuccess: (res) =>
       setResult({
         pkcs7: res.pkcs7,
-        who: res.cert ? `${res.cert.CN} · TIN ${res.cert.TIN}` : 'USB token',
+        who: res.cert?.CN ?? 'USB token',
       }),
     onError: () => setResult(null),
   })
@@ -174,11 +194,11 @@ function Signer({ mode, scenario }: { mode: 'real' | 'mock'; scenario?: Scenario
         <>
           <p className="muted">Choose a certificate, then sign the server challenge.</p>
           <ul className="certs">
-            {eimzo.certificates.map((c) => {
+            {eimzo.certificates.map((c, index) => {
               const status = eimzo.getCertStatus(c)
-              const selected = eimzo.selectedCert?.serialNumber === c.serialNumber
+              const selected = eimzo.selectedCert === c
               return (
-                <li key={c.serialNumber}>
+                <li key={`${c.type}:${c.serialNumber}:${index}`}>
                   <button
                     className={selected ? 'cert is-selected' : 'cert'}
                     onClick={() => eimzo.selectCert(c)}
@@ -204,7 +224,7 @@ function Signer({ mode, scenario }: { mode: 'real' | 'mock'; scenario?: Scenario
             <button
               className="btn btn--primary"
               onClick={() => eimzo.signIn()}
-              disabled={busy || !eimzo.selectedCert}
+              disabled={busy || !eimzo.selectedCert || eimzo.getCertStatus(eimzo.selectedCert) !== 'valid'}
             >
               {eimzo.isLoadingChallenge
                 ? 'Fetching challenge…'
@@ -351,8 +371,8 @@ function StatusBadge({ status }: { status: string }) {
   return <span className={`badge badge--${status}`}>{status.replace('_', ' ')}</span>
 }
 
-function StatusPill({ status }: { status: 'valid' | 'expired' | 'not_yet_valid' }) {
-  const label = status === 'valid' ? 'valid' : status === 'expired' ? 'expired' : 'not yet valid'
+function StatusPill({ status }: { status: CertStatus }) {
+  const label = status === 'not_yet_valid' ? 'not yet valid' : status
   return <span className={`pill pill--${status}`}>{label}</span>
 }
 

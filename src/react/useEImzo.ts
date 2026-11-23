@@ -1,9 +1,10 @@
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useMemo, useRef, useState } from 'react'
 
 import { EImzoError, mapError } from '../core/errors'
 import type { CertStatus, Certificate, IEImzoCore, SignResult } from '../core/types'
 import { useEImzoContext } from './context'
 import {
+  useBrowserLayoutEffect,
   useEImzoLifecycle,
   type EImzoStatus,
   type UseEImzoLifecycleOptions,
@@ -11,12 +12,18 @@ import {
 
 export type { EImzoStatus } from './useEImzoLifecycle'
 
+export type SignOutcome =
+  | { ok: true; result: SignResult }
+  | { ok: false; error: EImzoError }
+
+const signingCores = new WeakSet<IEImzoCore>()
+
 export interface UseEImzoOptions {
-  /** Consumer callback that fetches the server challenge to sign. */
-  getChallenge: () => Promise<string>
+  /** Fetches the exact text to sign. Pass the signal to the request to support cancellation. */
+  getChallenge: (signal: AbortSignal) => Promise<string>
   /** Called with the signature result on success. */
-  onSuccess: (result: SignResult) => void
-  /** Called with a typed error on any failure. No toasts/i18n are built in. */
+  onSuccess?: (result: SignResult) => void
+  /** Called with a typed error while the signing context is still active. */
   onError?: (error: EImzoError) => void
   /** Extra document payload merged with the challenge when `isOnlyChallenge` is false. */
   documentToSign?: Record<string, unknown>
@@ -49,14 +56,14 @@ export interface UseEImzoReturn {
   selectCertBySerial: (serialNumber: string) => void
 
   /** Challenge-response with a file/token certificate (defaults to the selected cert). */
-  signIn: (cert?: Certificate | null) => Promise<void>
+  signIn: (cert?: Certificate | null) => Promise<SignOutcome>
   /** Challenge-response via the USB-token / ID-card flow. */
-  signWithUsbToken: () => Promise<void>
+  signWithUsbToken: () => Promise<SignOutcome>
 
   // Manual script-loading handlers for Next.js <Script> (standalone mode).
   onBaseScriptLoad: () => void
   onClientScriptLoad: () => void
-  onScriptError: () => void
+  onScriptError: (error?: unknown) => void
 
   getCertStatus: (cert: Certificate) => CertStatus
   isCertExpired: (cert: Certificate) => boolean
@@ -83,95 +90,106 @@ export function useEImzo(options: UseEImzoOptions): UseEImzoReturn {
   const lifecycle = ctx ?? standalone
   const core = lifecycle.core
 
-  const [isLoadingChallenge, setIsLoadingChallenge] = useState(false)
-  const [isSigning, setIsSigning] = useState(false)
-  const [isUsbTokenSigning, setIsUsbTokenSigning] = useState(false)
-  const [signError, setSignError] = useState<EImzoError | null>(null)
+  const selectedCert = lifecycle.selectedCert
+  const scope = useMemo(() => ({
+    active: true,
+    operation: undefined as { controller: AbortController; selection?: Certificate | null } | undefined,
+  }), [core])
+  const [progress, setProgress] = useState<{
+    scope: typeof scope
+    kind: 'certificate' | 'usb'
+    fetching: boolean
+  } | null>(null)
+  const [signError, setSignError] = useState<{ scope: typeof scope; error: EImzoError } | null>(null)
+  const callbacks = useRef({ getChallenge, onSuccess, onError })
 
-  const onSuccessRef = useRef(onSuccess)
-  onSuccessRef.current = onSuccess
-  const onErrorRef = useRef(onError)
-  onErrorRef.current = onError
-  const getChallengeRef = useRef(getChallenge)
-  getChallengeRef.current = getChallenge
+  useBrowserLayoutEffect(() => {
+    callbacks.current = { getChallenge, onSuccess, onError }
+  }, [getChallenge, onSuccess, onError])
 
-  const reportSignError = useCallback((e: unknown): EImzoError => {
-    const err = e instanceof EImzoError ? e : mapError(e)
-    setSignError(err)
-    onErrorRef.current?.(err)
-    return err
-  }, [])
+  useBrowserLayoutEffect(() => {
+    scope.active = true
+    return () => {
+      scope.active = false
+      scope.operation?.controller.abort()
+    }
+  }, [scope])
 
-  const buildDataToSign = useCallback(
-    (challenge: string): string =>
-      isOnlyChallenge ? challenge : JSON.stringify({ ...documentToSign, challenge }),
-    [isOnlyChallenge, documentToSign]
-  )
+  useBrowserLayoutEffect(() => {
+    const operation = scope.operation
+    if (operation && operation.selection !== undefined && operation.selection !== selectedCert) {
+      operation.controller.abort()
+    }
+  }, [scope, selectedCert])
 
-  const runChallengeFlow = useCallback(
-    async (sign: (data: string) => Promise<SignResult>) => {
-      setSignError(null)
-      setIsLoadingChallenge(true)
-      try {
-        const challenge = await getChallengeRef.current()
-        if (!challenge || challenge.trim() === '') {
-          throw new EImzoError('UNKNOWN', 'Challenge cannot be empty.')
-        }
-        setIsLoadingChallenge(false)
-        const result = await sign(buildDataToSign(challenge))
-        onSuccessRef.current(result)
-      } catch (e) {
-        reportSignError(e)
-      } finally {
-        setIsLoadingChallenge(false)
+  const runChallengeFlow = useCallback(async (
+    kind: 'certificate' | 'usb',
+    target?: Certificate | null,
+  ): Promise<SignOutcome> => {
+    const cancelled = () => new EImzoError('USER_CANCELLED', 'The signing context changed.')
+    const fail = (error: EImzoError): SignOutcome => {
+      if (scope.active) {
+        setSignError({ scope, error })
+        callbacks.current.onError?.(error)
       }
-    },
-    [buildDataToSign, reportSignError]
-  )
+      return { ok: false, error }
+    }
+    if (!scope.active) return { ok: false, error: cancelled() }
+    if (!core) return fail(new EImzoError('UNKNOWN', 'Wrap in <EImzoProvider> or pass a core.'))
+    if (signingCores.has(core)) {
+      return fail(new EImzoError('SIGNING_IN_PROGRESS', 'A signing operation is already in progress.'))
+    }
+    if (kind === 'certificate' && !target) {
+      return fail(new EImzoError('INVALID_CERTIFICATE', 'No certificate selected.'))
+    }
+
+    const controller = new AbortController()
+    scope.operation = { controller, selection: kind === 'certificate' ? selectedCert : undefined }
+    signingCores.add(core)
+    setSignError(null)
+    setProgress({ scope, kind, fetching: true })
+
+    let result: SignResult
+    try {
+      const challenge = await callbacks.current.getChallenge(controller.signal)
+      if (controller.signal.aborted) return { ok: false, error: cancelled() }
+      if (typeof challenge !== 'string' || challenge.trim() === '') {
+        throw new EImzoError('UNKNOWN', 'Challenge cannot be empty.')
+      }
+      const data = isOnlyChallenge ? challenge : JSON.stringify({ ...documentToSign, challenge })
+      setProgress({ scope, kind, fetching: false })
+      result = target ? await core.sign(target, data) : await core.signWithUsbToken(data)
+    } catch (e) {
+      if (controller.signal.aborted) return { ok: false, error: cancelled() }
+      return fail(mapError(e))
+    } finally {
+      signingCores.delete(core)
+      scope.operation = undefined
+      if (scope.active) setProgress(null)
+    }
+
+    if (controller.signal.aborted) return { ok: false, error: cancelled() }
+    setSignError(null)
+    callbacks.current.onSuccess?.(result)
+    return { ok: true, result }
+  }, [core, scope, selectedCert, isOnlyChallenge, documentToSign])
 
   const signIn = useCallback(
-    async (cert?: Certificate | null) => {
-      if (!core) {
-        reportSignError(new EImzoError('UNKNOWN', 'No E-IMZO core available. Wrap in <EImzoProvider> or pass `core`.'))
-        return
-      }
-      const target = cert ?? lifecycle.selectedCert
-      if (!target) {
-        reportSignError(new EImzoError('UNKNOWN', 'No certificate selected.'))
-        return
-      }
-      setIsSigning(true)
-      try {
-        await runChallengeFlow((data) => core.sign(target, data))
-      } finally {
-        setIsSigning(false)
-      }
-    },
-    [core, lifecycle.selectedCert, runChallengeFlow, reportSignError]
+    (cert?: Certificate | null) => runChallengeFlow('certificate', cert ?? selectedCert),
+    [runChallengeFlow, selectedCert]
   )
-
-  const signWithUsbToken = useCallback(async () => {
-    if (!core) {
-      reportSignError(new EImzoError('UNKNOWN', 'No E-IMZO core available. Wrap in <EImzoProvider> or pass `core`.'))
-      return
-    }
-    setIsUsbTokenSigning(true)
-    try {
-      await runChallengeFlow((data) => core.signWithUsbToken(data))
-    } finally {
-      setIsUsbTokenSigning(false)
-    }
-  }, [core, runChallengeFlow, reportSignError])
+  const signWithUsbToken = useCallback(() => runChallengeFlow('usb'), [runChallengeFlow])
+  const currentProgress = progress?.scope === scope ? progress : null
 
   return {
     status: lifecycle.status,
     certificates: lifecycle.certificates,
     selectedCert: lifecycle.selectedCert,
-    error: signError ?? lifecycle.error,
+    error: (signError?.scope === scope ? signError.error : null) ?? lifecycle.error,
     isInstalling: lifecycle.status === 'installing' || lifecycle.status === 'loading_scripts',
-    isLoadingChallenge,
-    isSigning,
-    isUsbTokenSigning,
+    isLoadingChallenge: currentProgress?.fetching ?? false,
+    isSigning: currentProgress?.kind === 'certificate',
+    isUsbTokenSigning: currentProgress?.kind === 'usb',
     initialize: lifecycle.initialize,
     refreshCertificates: lifecycle.refreshCertificates,
     selectCert: lifecycle.selectCert,

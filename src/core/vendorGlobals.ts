@@ -1,3 +1,5 @@
+import { EImzoError } from './errors'
+
 // Ambient-style typings for the vendor globals defined by e-imzo.js / e-imzo-client.js.
 // Kept as a regular module (not a .d.ts) so it participates in the bundle's type graph.
 
@@ -76,7 +78,8 @@ export function getEIMZOClient(): VendorEIMZOClient {
   const client =
     typeof window !== 'undefined' ? window.EIMZOClient : (globalThis as { EIMZOClient?: VendorEIMZOClient }).EIMZOClient
   if (!client) {
-    throw new Error(
+    throw new EImzoError(
+      'APP_NOT_RUNNING',
       'EIMZOClient global is not available. Call loadScripts()/init() first, or load the vendor scripts.'
     )
   }

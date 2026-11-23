@@ -132,7 +132,7 @@ code { font-family: var(--mono); font-size: 0.9em; }
 
 .pill { font: 600 11px/1 var(--mono); padding: 4px 8px; border-radius: 999px; flex: none; }
 .pill--valid { color: var(--ok); background: var(--ok-bg); }
-.pill--expired { color: var(--err); background: var(--err-bg); }
+.pill--expired, .pill--invalid { color: var(--err); background: var(--err-bg); }
 .pill--not_yet_valid { color: var(--warn); background: var(--warn-bg); }
 
 /* Actions */

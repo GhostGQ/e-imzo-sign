@@ -16,8 +16,7 @@ export interface EImzoProviderProps {
    */
   mock?: boolean | MockEImzoOptions
   /**
-   * Explicit core instance. Highest precedence; use for custom implementations or to
-   * keep the mock out of the production bundle (import it yourself only in dev).
+   * Explicit core instance. Highest precedence; useful for custom implementations.
    */
   core?: IEImzoCore
   /** Initialize once on mount (loadScripts + install + list). Default true. */

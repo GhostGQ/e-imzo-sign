@@ -18,6 +18,11 @@ const now = new Date('2026-07-02T00:00:00Z')
 const day = 24 * 60 * 60 * 1000
 
 describe('getCertStatus / isCertExpired', () => {
+  it('flags invalid dates and inverted validity ranges', () => {
+    expect(getCertStatus(cert(new Date(NaN), now), now)).toBe('invalid')
+    expect(getCertStatus(cert(new Date(now.getTime() + day), now), now)).toBe('invalid')
+  })
+
   it('valid when now is within the window', () => {
     const c = cert(new Date(now.getTime() - day), new Date(now.getTime() + day))
     expect(getCertStatus(c, now)).toBe('valid')
