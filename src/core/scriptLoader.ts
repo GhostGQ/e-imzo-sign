@@ -5,97 +5,93 @@ import { VENDOR_BASE, VENDOR_CLIENT } from './vendor'
 const BASE_ID = 'eimzo-vendor-base'
 const CLIENT_ID = 'eimzo-vendor-client'
 
-function eimzoLoaded(): boolean {
-  return typeof window !== 'undefined' && typeof window.EIMZOClient !== 'undefined'
+function baseLoaded(): boolean {
+  return typeof window !== 'undefined' && Boolean(window.CAPIWS && window.Base64)
 }
 
-/** Inject a vendor script inline (self-contained; no network request). */
+/** Replace a tag whose script did not initialize, for example after a CSP failure. */
 function injectInline(id: string, code: string): void {
-  if (document.getElementById(id)) return
+  document.getElementById(id)?.remove()
   const el = document.createElement('script')
   el.id = id
-  el.type = 'text/javascript'
   el.textContent = code
   document.head.appendChild(el)
 }
 
-/**
- * Loads (or waits for) the vendor E-IMZO scripts.
- *
- * - `auto`: inline-injects the bundled vendor JS and resolves once `window.EIMZOClient`
- *   is available. Resolves immediately if it already exists (SPA remount).
- * - `manual`: resolves once both `markBaseScriptLoaded()` and `markClientScriptLoaded()`
- *   have fired (or if `window.EIMZOClient` already exists). `markScriptError()` rejects.
- */
 export class ScriptLoader {
-  private readonly mode: ScriptLoading['mode']
-  private baseLoaded = false
-  private clientLoaded = false
-  private promise: Promise<void> | null = null
-  private resolve?: () => void
-  private reject?: (e: unknown) => void
-
-  constructor(loading: ScriptLoading) {
-    this.mode = loading.mode
+  private pending?: {
+    promise: Promise<void>
+    resolve: () => void
+    reject: (error: EImzoError) => void
   }
+  private manualError?: EImzoError
+
+  constructor(private readonly loading: ScriptLoading) {}
 
   loadScripts(): Promise<void> {
-    if (this.promise) return this.promise
-
     if (typeof window === 'undefined') {
       return Promise.reject(
         new EImzoError('APP_NOT_RUNNING', 'E-IMZO scripts require a browser environment.')
       )
     }
 
-    if (eimzoLoaded()) return Promise.resolve()
+    if (this.pending) return this.pending.promise
+    if (baseLoaded() && window.EIMZOClient) {
+      this.manualError = undefined
+      return Promise.resolve()
+    }
 
-    this.promise = new Promise<void>((resolve, reject) => {
-      this.resolve = resolve
-      this.reject = reject
-    })
-
-    if (this.mode === 'auto') {
+    if (this.loading.mode === 'auto') {
       try {
-        injectInline(BASE_ID, VENDOR_BASE)
-        injectInline(CLIENT_ID, VENDOR_CLIENT)
-        // Inline scripts execute synchronously on append; EIMZOClient should exist now.
-        if (eimzoLoaded()) {
-          this.resolve?.()
-        } else {
-          this.reject?.(
-            new EImzoError('UNKNOWN', 'Vendor scripts injected but EIMZOClient did not initialize.')
-          )
-        }
-      } catch (e) {
-        this.reject?.(new EImzoError('UNKNOWN', 'Failed to inject E-IMZO vendor scripts.', { original: e }))
+        if (!baseLoaded()) injectInline(BASE_ID, VENDOR_BASE)
+        if (baseLoaded() && !window.EIMZOClient) injectInline(CLIENT_ID, VENDOR_CLIENT)
+        if (baseLoaded() && window.EIMZOClient) return Promise.resolve()
+        throw new Error('Vendor globals are missing after script injection.')
+      } catch (original) {
+        return Promise.reject(
+          new EImzoError('UNKNOWN', 'Failed to initialize E-IMZO vendor scripts.', { original })
+        )
       }
     }
-    // manual mode: stays pending until the mark* signals arrive.
 
-    return this.promise
+    if (this.manualError) {
+      const error = this.manualError
+      this.manualError = undefined
+      return Promise.reject(error)
+    }
+
+    let resolve!: () => void
+    let reject!: (error: EImzoError) => void
+    const promise = new Promise<void>((res, rej) => {
+      resolve = res
+      reject = rej
+    })
+    this.pending = { promise, resolve, reject }
+    return promise
   }
 
   markBaseScriptLoaded(): void {
-    this.baseLoaded = true
     this.settleManual()
   }
 
   markClientScriptLoaded(): void {
-    this.clientLoaded = true
     this.settleManual()
   }
 
-  markScriptError(e?: unknown): void {
-    this.reject?.(
-      new EImzoError('APP_NOT_RUNNING', 'Failed to load E-IMZO vendor scripts.', { original: e })
-    )
+  markScriptError(original?: unknown): void {
+    if (this.loading.mode !== 'manual') return
+    const error = new EImzoError('APP_NOT_RUNNING', 'Failed to load E-IMZO vendor scripts.', { original })
+    const pending = this.pending
+    this.pending = undefined
+    if (pending) pending.reject(error)
+    else this.manualError = error
   }
 
   private settleManual(): void {
-    if (this.mode !== 'manual') return
-    if ((this.baseLoaded && this.clientLoaded) || eimzoLoaded()) {
-      this.resolve?.()
-    }
+    if (this.loading.mode !== 'manual' || !baseLoaded() || !window.EIMZOClient) return
+    this.manualError = undefined
+    const pending = this.pending
+    this.pending = undefined
+    pending?.resolve()
   }
 }

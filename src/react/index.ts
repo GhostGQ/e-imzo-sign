@@ -1,5 +1,5 @@
 export { useEImzo } from './useEImzo'
-export type { UseEImzoOptions, UseEImzoReturn } from './useEImzo'
+export type { SignOutcome, UseEImzoOptions, UseEImzoReturn } from './useEImzo'
 
 export { EImzoProvider } from './EImzoProvider'
 export type { EImzoProviderProps } from './EImzoProvider'

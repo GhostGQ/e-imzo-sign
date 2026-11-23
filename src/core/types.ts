@@ -2,7 +2,7 @@
 export type KeyType = 'pfx' | 'ftjc'
 
 /** Validity status of a certificate relative to "now". */
-export type CertStatus = 'valid' | 'expired' | 'not_yet_valid'
+export type CertStatus = 'valid' | 'expired' | 'not_yet_valid' | 'invalid'
 
 /**
  * A normalized certificate/key entry. Superset of the fields E-IMZO returns for
@@ -37,6 +37,13 @@ export interface Certificate {
 
   /** Original vendor value object, used to round-trip to loadKey. */
   raw: unknown
+}
+
+/** Identity shared by certificate selection and the loaded-key cache. */
+export function certificateIdentity(cert: Certificate): string {
+  return JSON.stringify(cert.type === 'pfx'
+    ? [cert.type, cert.serialNumber, cert.disk, cert.path, cert.name, cert.alias]
+    : [cert.type, cert.serialNumber, cert.cardUID])
 }
 
 /** Result of a signing / challenge-response operation. */
@@ -115,8 +122,11 @@ export interface IEImzoCore {
 /** Compute a certificate's validity status relative to `now` (defaults to current time). */
 export function getCertStatus(cert: Certificate, now: Date = new Date()): CertStatus {
   const t = now.getTime()
-  if (t < cert.validFrom.getTime()) return 'not_yet_valid'
-  if (t > cert.validTo.getTime()) return 'expired'
+  const from = cert.validFrom.getTime()
+  const to = cert.validTo.getTime()
+  if (!Number.isFinite(from) || !Number.isFinite(to) || from > to) return 'invalid'
+  if (t < from) return 'not_yet_valid'
+  if (t > to) return 'expired'
   return 'valid'
 }
 

@@ -7,10 +7,13 @@ export function keyIdCacheKey(idPart: string): string {
 
 /**
  * Cookie-backed storage (default). Session cookies (no explicit expiry), `SameSite=Lax`,
- * `path=/`. Safe no-op when `document` is unavailable (SSR).
+ * `path=/`, and `Secure` over HTTPS. Safe no-op when `document` is unavailable (SSR).
  */
 export function cookieKeyIdStorage(): KeyIdStorage {
   const available = typeof document !== 'undefined'
+  const attributes = available && document.location.protocol === 'https:'
+    ? '; path=/; SameSite=Lax; Secure'
+    : '; path=/; SameSite=Lax'
   return {
     get(key) {
       if (!available) return null
@@ -18,15 +21,20 @@ export function cookieKeyIdStorage(): KeyIdStorage {
       const found = document.cookie
         .split('; ')
         .find((row) => row.startsWith(prefix))
-      return found ? decodeURIComponent(found.slice(prefix.length)) : null
+      if (!found) return null
+      try {
+        return decodeURIComponent(found.slice(prefix.length))
+      } catch {
+        return null
+      }
     },
     set(key, value) {
       if (!available) return
-      document.cookie = `${encodeURIComponent(key)}=${encodeURIComponent(value)}; path=/; SameSite=Lax`
+      document.cookie = `${encodeURIComponent(key)}=${encodeURIComponent(value)}${attributes}`
     },
     remove(key) {
       if (!available) return
-      document.cookie = `${encodeURIComponent(key)}=; path=/; Max-Age=0; SameSite=Lax`
+      document.cookie = `${encodeURIComponent(key)}=${attributes}; Max-Age=0`
     },
   }
 }

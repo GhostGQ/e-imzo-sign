@@ -22,6 +22,13 @@ describe('mapError', () => {
   it('maps a DOM Event with no reason to APP_NOT_RUNNING', () => {
     const fakeEvent = { isTrusted: true }
     expect(mapError(fakeEvent, null).code).toBe('APP_NOT_RUNNING')
+    expect(mapError(fakeEvent, null, 'OUTDATED_VERSION')).toMatchObject({
+      code: 'APP_NOT_RUNNING', original: fakeEvent,
+    })
+  })
+
+  it('recognizes the upgrade message emitted by the bundled client', () => {
+    expect(mapError(null, 'Please install new version of E-IMZO').code).toBe('OUTDATED_VERSION')
   })
 
   it('honors a forced code when reason is generic', () => {
