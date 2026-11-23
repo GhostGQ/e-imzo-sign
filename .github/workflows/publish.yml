@@ -1,0 +1,75 @@
+name: Publish to npm
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: npm-release
+  queue: max
+
+jobs:
+  verify:
+    name: Verify release
+    if: github.event.created
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          package-manager-cache: false
+      - name: Validate tag and commit
+        shell: bash
+        run: |
+          version_pattern='^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
+          if [[ ! "$GITHUB_REF_NAME" =~ $version_pattern ]]; then
+            echo "::error::Use a stable version tag in the form vX.Y.Z."
+            exit 1
+          fi
+
+          package_version=$(node -p "require('./package.json').version")
+          if [[ "$GITHUB_REF_NAME" != "v$package_version" ]]; then
+            echo "::error::The tag must match the version in package.json."
+            exit 1
+          fi
+
+          if ! git merge-base --is-ancestor HEAD refs/remotes/origin/main; then
+            echo "::error::The tagged commit must already be on main."
+            exit 1
+          fi
+      - run: npm ci
+      - run: npm run check
+        env:
+          NPM_RELEASE_DIR: ${{ runner.temp }}
+      - uses: actions/upload-artifact@v6
+        with:
+          name: npm-package
+          path: ${{ runner.temp }}/e-imzo-web-*.tgz
+          if-no-files-found: error
+
+  publish:
+    name: Publish checked tarball
+    needs: verify
+    runs-on: ubuntu-latest
+    environment: npm
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+      - uses: actions/download-artifact@v7
+        with:
+          name: npm-package
+      - name: Publish to npm
+        shell: bash
+        run: npm publish "./e-imzo-web-${GITHUB_REF_NAME#v}.tgz" --access public --ignore-scripts

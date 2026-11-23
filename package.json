@@ -5,6 +5,10 @@
   "type": "module",
   "sideEffects": false,
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/GhostGQ/e-imzo-sign.git"
+  },
   "keywords": [
     "e-imzo",
     "eimzo",
@@ -23,19 +27,34 @@
   ],
   "exports": {
     ".": {
-      "types": "./dist/core/index.d.ts",
-      "import": "./dist/core/index.js",
-      "require": "./dist/core/index.cjs"
+      "import": {
+        "types": "./dist/core/index.d.ts",
+        "default": "./dist/core/index.js"
+      },
+      "require": {
+        "types": "./dist/core/index.d.cts",
+        "default": "./dist/core/index.cjs"
+      }
     },
     "./react": {
-      "types": "./dist/react/index.d.ts",
-      "import": "./dist/react/index.js",
-      "require": "./dist/react/index.cjs"
+      "import": {
+        "types": "./dist/react/index.d.ts",
+        "default": "./dist/react/index.js"
+      },
+      "require": {
+        "types": "./dist/react/index.d.cts",
+        "default": "./dist/react/index.cjs"
+      }
     },
     "./mock": {
-      "types": "./dist/mock/index.d.ts",
-      "import": "./dist/mock/index.js",
-      "require": "./dist/mock/index.cjs"
+      "import": {
+        "types": "./dist/mock/index.d.ts",
+        "default": "./dist/mock/index.js"
+      },
+      "require": {
+        "types": "./dist/mock/index.d.cts",
+        "default": "./dist/mock/index.cjs"
+      }
     },
     "./vendor/e-imzo.js": "./vendor/e-imzo.js",
     "./vendor/e-imzo-client.js": "./vendor/e-imzo-client.js"
@@ -50,7 +69,9 @@
     "demo": "npm run build:vendor && vite --config demo/vite.config.ts",
     "demo:build": "npm run build:vendor && vite build --config demo/vite.config.ts",
     "demo:preview": "vite preview --config demo/vite.config.ts",
-    "prepublishOnly": "npm run build"
+    "prepublishOnly": "npm run check",
+    "check:package": "node scripts/check-package.mjs",
+    "check": "npm run typecheck && npm test && npm run build && npm run demo:build && npm run check:package"
   },
   "peerDependencies": {
     "react": ">=18"
